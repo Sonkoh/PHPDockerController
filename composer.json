@@ -1,0 +1,14 @@
+{
+    "name": "sonkoh/php-docker-controller",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Sonkoh\\PhpDockerController\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Sonkoh"
+        }
+    ]
+}
