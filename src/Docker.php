@@ -21,7 +21,6 @@ function ExecuteRequest($method, $api, $data = "{}")
             'Content-Type: application/json'
         ),
     ));
-
     $response = curl_exec($curl);
     curl_close($curl);
     return [
@@ -68,8 +67,66 @@ class Container
             return throw new Exception($check);
         if (!preg_match('/^[\/]?[a-zA-Z0-9][a-zA-Z0-9_.-]+$/', $name))
             return throw new Exception("Name must match regular expression: `/^[\/]?[a-zA-Z0-9][a-zA-Z0-9_.-]+$/`");
-        $data = $data == [] ? "{}" : json_encode($data);
-        $req = ExecuteRequest("POST", "/containers/create?name=" . $name, $data);
+        $data["hostconfig"] = $data["hostconfig"] ?? [];
+        $data["hostconfig"]["Binds"] = [];
+        $env = [];
+        foreach ($data["envrioment"] as $key => $val) {
+            array_push($env, "$key=$val");
+        }
+        $ports = (object) [];
+        $exposedPorts = (object) [];
+        foreach ($data["ports"] as $port) {
+            $exposedPorts->{strval($port->destination_port) . "/$port->port_type"} = (object) [];
+            $ports->{strval($port->destination_port) . "/$port->port_type"} = [
+                [
+                    "HostIp" => $port->container_ip,
+                    "HostPort" => strval($port->container_port)
+                ]
+            ];
+        }
+        $volumes = [];
+        foreach ($data["volumes"] as $key => $val) {
+            $volumes[] = "$val:$key";
+        }
+        $data["hostconfig"]["Binds"] = $volumes;
+        $data["hostconfig"]["PortBindings"] = $ports;
+        $container = [
+            "Hostname" => $data["hostname"] ?? "",
+            "Domainname" => $data["domainname"] ?? "",
+            "User" => $data["user"] ?? "",
+            "AttachStdin" => $data["attachStdin"] ?? false,
+            "AttachStdout" => $data["attachStdout"] ?? true,
+            "AttachStderr" => $data["attachStderr"] ?? true,
+            "Tty" => $data["tty"] ?? false,
+            "OpenStdin" => $data["openStdin"] ?? false,
+            "StdinOnce" => $data["stdinOnce"] ?? false,
+            "Env" => $env,
+            "Cmd" => $data["cmd"] ?? ["/bin/bash"],
+            "Entrypoint" => isset($data["entrypoint"]) ? $data["entrypoint"] : null,
+            "Image" => $data["image"]->identifier,
+            "Labels" => $data["labels"] ?? [],
+            "Volumes" => (object) [],
+            "WorkingDir" => $data["workingdir"] ?? "",
+            "NetworkDisabled" => $data["networkdisabled"] ?? false,
+            "MacAddress" => $data["macaddress"] ?? "",
+            "ExposedPorts" => $exposedPorts,
+            "StopSignal" => $data["stopsignal"] ?? "SIGTERM",
+            "StopTimeout" => $data["stoptimeout"] ?? 10,
+            "HostConfig" => $data["hostconfig"],
+            "NetworkingConfig" => $data["networkingconfig"] ?? (object) []
+        ];
+        echo "\n";
+        echo "\n";
+        echo "\n";
+        echo json_encode($container);
+        echo "\n";
+        echo "\n";
+        echo "\n";
+        echo "\n";
+        $req = ExecuteRequest("POST", "/containers/create?name=" . $name, json_encode($container));
+        echo $req["response"];
+        echo "\n";
+        echo "\n";
         if ($req["code"] != 201)
             return throw new Exception(json_decode($req["response"], true)["message"]);
         $this->identifier = json_decode($req["response"], true)["Id"];
@@ -170,7 +227,7 @@ class Container
     }
 
     /**
-     * Get processes runing inside the container.
+     * Get logs of the container.
      *
      * @return array
      * @param bool $follow Keep connection after returning logs.
@@ -342,7 +399,6 @@ class Container
             return throw new Exception($check);
         $filters = $filters == [] ? "{}" : json_encode($filters);
         $only_running = !$only_running;
-        // PERMITIR SOLO LOS FILTROS DISPONIBLES
         $req = ExecuteRequest("GET", "/containers/json?all=$only_running&&limit=$limit&&size=$size&&filters=$filters");
         if ($req["code"] != 200)
             return throw new Exception(json_decode($req["response"], true)["message"]);
@@ -372,14 +428,163 @@ class Container
     }
 }
 
+class Port
+{
+    public $port_type, $destination_port, $container_ip, $container_port;
+    /**
+     * Create a port binding for a container.
+     *
+     * @param string $identifier Container id
+     */
+    function __construct(string $port_type = "tcp", int $destination_port, string $container_ip, int $container_port)
+    {
+        $this->port_type = $port_type;
+        $this->destination_port = $destination_port;
+        $this->container_ip = $container_ip;
+        $this->container_port = $container_port;
+        return;
+    }
+}
+
+class Volume
+{
+    public $volume_name;
+    /**
+     * Create a new volume.
+     *
+     * @param string $volume_name Volume name.
+     * @param bool $b Don't touch it.
+     */
+    function __construct(string $volume_name, $b = false)
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        $this->volume_name = $volume_name;
+        if ($b)
+            return;
+        $req = ExecuteRequest("POST", "/volumes/create", json_encode([
+            "Name" => $volume_name
+        ]));
+        if ($req["code"] != 201)
+            return throw new Exception(json_decode($req["response"], true)["message"]);
+        return;
+    }
+
+    /**
+     * Remove the volume.
+     *
+     * @return bool
+     * @param bool $force Force the removal of the volume.
+     */
+
+    public function remove($force = false)
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        $req = ExecuteRequest("DELETE", "/volumes/$this->volume_name", [
+            "force" => $force
+        ]);
+        if ($req["code"] != 204)
+            return throw new Exception($req["response"]["message"]);
+        return true;
+    }
+
+    function __toString()
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        return $this->volume_name;
+    }
+
+    /**
+     * Get an existing volume by volume name.
+     *
+     * @param string $name Volume name.
+     */
+    static function find($name)
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        $req = ExecuteRequest("GET", "/volumes/$name");
+        if ($req["code"] != 200)
+            return throw new Exception(json_decode($req["response"], true)["message"]);
+        return new Volume($name, true);
+    }
+}
+
+class Image
+{
+    public $identifier;
+    /**
+     * Create or find an image.
+     *
+     * @param bool $b Keep it in false.
+     * @param string $name Image name.
+     * @param string $context_location
+     */
+    function __construct(bool $b = false, string $volume_name, string $context_location = "")
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        $this->identifier = $volume_name;
+        if ($b)
+            return;
+        // $req = ExecuteRequest("POST", "/build", json_encode([
+        //     "t" => $volume_name
+        // ]));
+        // // if ($req["code"] != 200)
+        // //     return throw new Exception(json_decode($req["response"], true)["message"]);
+        // // return;
+    }
 
 
-// $container = Container::find("ac7a3858499434a2d33f1af41a91790cf8189c668ed372ffa134b9095b17fa60");
+    function __toString()
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        return $this->identifier;
+    }
 
-// echo $container->logs();
+    /**
+     * Remove the image.
+     *
+     * @return bool
+     * @param bool $force Force the removal of the image.
+     * @param bool $noprune Do not delete untagged parent images.
+     */
+
+    public function remove($force = false, $noprune = false)
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        $req = ExecuteRequest("DELETE", "/images/$this->identifier", [
+            "force" => $force,
+            "noprune" => $noprune
+        ]);
+        if ($req["code"] != 200)
+            return throw new Exception($req["response"]["message"]);
+        return true;
+    }
+
+    /**
+     * Get an existing image by image name.
+     *
+     * @param string $name Image name.
+     */
+    static function find(string $name)
+    {
+        if ($check = Auth::Check())
+            return throw new Exception($check);
+        $req = ExecuteRequest("GET", "/images/$name/json");
+        if ($req["code"] != 200)
+            return throw new Exception(json_decode($req["response"], true)["message"]);
+        return new Image(true, json_decode($req["response"], true)["Id"]);
+    }
+}
 
 
-[
+// echo Image::find("ubuntu:latest");
+$container = new Container("container_name", [
     "hostname" => "",
     "domainname" => "",
     "user" => "",
@@ -394,26 +599,73 @@ class Container
         "BAZ" => "quux"
     ],
     "cmd" => [
-        "date"
+        "echo",
+        "Hello World"
     ],
     "entrypoint" => "",
-    "image" => new Image("ubuntu:latest"),
+    "image" => Image::find("ubuntu:latest"),
     "labels" => [
         "com.example.vendor" => "Acme",
         "com.example.license" => "GPL",
         "com.example.version" => "1.0"
     ],
     "volumes" => [
-        "/root" => new Volume("volume_1")
+        "/root" => new Volume("volume_1"), // Use a volume
+        "/home" => "/deamon/location/to" // Use a custom location
     ],
     "workingdir" => "",
     "networkdisabled" => false,
-    "macaddress" => "12:34:56:78:9a:bc",
+    "macaddress" => "",
     "ports" => [
         new Port("tcp", 80, "", 8080)
     ],
     "stopsignal" => "SIGTERM",
     "stoptimeout" => 10,
-    "hostconfig" => [],
-    "networkingconfig" => []
-];
+    "hostconfig" => [], // HostConfig data in `https://docs.docker.com/engine/api/v1.43/#tag/Container/operation/ContainerCreate`
+    "networkingconfig" => (object) [] // NetworkingConfig in `https://docs.docker.com/engine/api/v1.43/#tag/Container/operation/ContainerCreate`. It most be an associative array.
+]);
+echo $container;
+
+// $container = Container::find("ac7a3858499434a2d33f1af41a91790cf8189c668ed372ffa134b9095b17fa60");
+
+// echo $container->logs();
+
+
+// [
+//     "hostname" => "",
+//     "domainname" => "",
+//     "user" => "",
+//     "attachStdin" => false,
+//     "attachStdout" => true,
+//     "attachStderr" => true,
+//     "tty" => false,
+//     "openStdin" => false,
+//     "stdinOnce" => false,
+//     "envrioment" => [
+//         "FOO" => "bar",
+//         "BAZ" => "quux"
+//     ],
+//     "cmd" => [
+//         "date"
+//     ],
+//     "entrypoint" => "",
+//     "image" => new Image("ubuntu:latest"),
+//     "labels" => [
+//         "com.example.vendor" => "Acme",
+//         "com.example.license" => "GPL",
+//         "com.example.version" => "1.0"
+//     ],
+//     "volumes" => [
+//         "/root" => new Volume("volume_1")
+//     ],
+//     "workingdir" => "",
+//     "networkdisabled" => false,
+//     "macaddress" => "12:34:56:78:9a:bc",
+//     "ports" => [
+//         new Port("tcp", 80, "", 8080)
+//     ],
+//     "stopsignal" => "SIGTERM",
+//     "stoptimeout" => 10,
+//     "hostconfig" => [],
+//     "networkingconfig" => []
+// ];

@@ -16,7 +16,7 @@ $ composer require sonkoh/php-docker-controller
 - Create or modify a `.env`, else, modify the config file in `/vendor/sonkoh/php-docker-controller/Config.php` and set
 ```dotenv
 DOCKER_VERSION=v1.25 # Your version of Deamon (you can get it with `docker --version`)
-DOCKER_API="http://127.0.0.1:2378"# Your deamon api link
+DOCKER_API="http://127.0.0.1:2378" # Your deamon api link
 DOCKER_ENABLE="true"
 ```
 
@@ -57,28 +57,30 @@ $container = new Container("container_name", [
         "BAZ" => "quux"
     ],
     "cmd" => [
-        "date"
+        "echo",
+        "Hello World"
     ],
     "entrypoint" => "",
-    "image" => new Image("ubuntu:latest"), // REQUIRED
+    "image" => Image::find("ubuntu:latest"),
     "labels" => [
         "com.example.vendor" => "Acme",
         "com.example.license" => "GPL",
         "com.example.version" => "1.0"
     ],
     "volumes" => [
-        "/root" => new Volume("volume_1")
+        "/root" => new Volume("volume_1"), // Use a volume
+        "/home" => "/deamon/location/to" // Use a custom location
     ],
     "workingdir" => "",
     "networkdisabled" => false,
-    "macaddress" => "12:34:56:78:9a:bc",
+    "macaddress" => "",
     "ports" => [
         new Port("tcp", 80, "", 8080)
     ],
     "stopsignal" => "SIGTERM",
     "stoptimeout" => 10,
     "hostconfig" => [], // HostConfig data in `https://docs.docker.com/engine/api/v1.43/#tag/Container/operation/ContainerCreate`
-    "networkingconfig" => [] // NetworkingConfig in `https://docs.docker.com/engine/api/v1.43/#tag/Container/operation/ContainerCreate`
+    "networkingconfig" => (object) [] // NetworkingConfig in `https://docs.docker.com/engine/api/v1.43/#tag/Container/operation/ContainerCreate`. It most be an associative array.
 ]);
 
 print($container); // Returns container id.
@@ -124,7 +126,7 @@ $port = new Port(
 ##### Get an existing image
 
 ```php
-$image = new Image("ubuntu:latest")
+$image = Image::find("ubuntu:latest")
 print($image); // Returns image identifier.
 ```
 
@@ -147,4 +149,11 @@ print($volume); // Returns volume identifier.
 ```php
 $volume = new Volume("volume_name") 
 print($volume); // Returns volume identifier.
+```
+
+##### Remove an existing volume
+
+```php
+$volume = Volume::find("volume_name")
+$volume->remove();
 ```
